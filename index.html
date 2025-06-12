@@ -48,6 +48,25 @@
             color: #777;
         }
 
+        .loading-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #535353;
+            z-index: 15;
+            text-align: center;
+        }
+
         .game-over-screen {
             position: absolute;
             top: 0;
@@ -105,6 +124,9 @@
         <div class="game-info">
             Skor: <span id="score">0</span>
         </div>
+        <div class="loading-screen" id="loadingScreen">
+            <p>Görseller yükleniyor...</p>
+        </div>
         <div class="game-over-screen" id="gameOverScreen">
             <p>OYUN BİTTİ</p>
             <p class="restart-text">Tekrar oynamak için BOŞLUK tuşuna basın</p>
@@ -119,17 +141,26 @@
         const scoreDisplay = document.getElementById('score');
         const gameOverScreen = document.getElementById('gameOverScreen');
         const finalScoreDisplay = document.getElementById('finalScore');
+        const loadingScreen = document.getElementById('loadingScreen');
 
         // Oyun ayarları
-        const GAME_SPEED = 5; // Oyun hızı (piksel/kare)
+        let GAME_SPEED = 5; // Oyun hızı (piksel/kare) - artık let çünkü değişecek
+        const INITIAL_GAME_SPEED = 5; // Başlangıç oyun hızı
+        const SPEED_INCREASE_INTERVAL = 1000; // Her 1000 skorda hızı artır
+        const SPEED_INCREASE_AMOUNT = 0.5; // Hız artış miktarı
         const GRAVITY = 0.6; // Yerçekimi kuvveti
         const JUMP_STRENGTH = -10; // Zıplama kuvveti
         const GROUND_LEVEL = canvas.height - 30; // Zemin seviyesi
 
         // Dinozor ayarları
+        // Not: Çizimler için DINO_WIDTH ve DINO_HEIGHT yaklaşık referans değerlerdir.
+        // Çarpışma için kullanılacak boyutlar.
         const DINO_WIDTH = 40;
         const DINO_HEIGHT = 50;
         const DINO_START_X = 50;
+        const DINO_RUN_ANIM_SPEED = 6; // Dinozor animasyon hızı (daha küçük değer daha hızlı)
+        let dinoRunFrame = 0; // Dinozor animasyon karesi
+        const PTERO_ANIM_SPEED = 8; // Kuş animasyon hızı
 
         let dinoY = GROUND_LEVEL - DINO_HEIGHT; // Dinozorun Y koordinatı
         let dinoVelocityY = 0; // Dinozorun dikey hızı
@@ -137,35 +168,105 @@
         let score = 0; // Oyun skoru
         let gameOver = false; // Oyun bitti mi?
         let animationFrameId; // requestAnimationFrame ID'si
+        let lastScoreSpeedIncrease = 0; // Son hız artışının olduğu skor
+
+        // Zemin ayarları
+        const GROUND_HEIGHT = 2; // Zemin çizgisinin kalınlığı
+        let groundX = 0; // Zemin çizgisi kaydırma pozisyonu
 
         // Kaktüs ayarları
-        const CACTUS_WIDTH = 20;
-        const CACTUS_HEIGHT = 40;
         const CACTUS_GAP_MIN = 300; // Kaktüsler arası minimum boşluk
         const CACTUS_GAP_MAX = 600; // Kaktüsler arası maksimum boşluk
         const CACTUS_COUNT = 3; // Ekranda aynı anda olabilecek kaktüs sayısı
         const cacti = []; // Kaktüslerin listesi
+
+        // Pterodactyl (Kuş) ayarları
+        const PTERO_WIDTH = 50;
+        const PTERO_HEIGHT = 30;
+        const PTERO_MIN_HEIGHT = 50; // Kuşun minimum uçuş yüksekliği
+        const PTERO_MAX_HEIGHT = 100; // Kuşun maksimum uçuş yüksekliği
+        const PTERO_SPAWN_SCORE = 500; // Kuşların belirmeye başlayacağı skor
+        const PTERO_GAP_MIN = 700; // Kuşlar arası minimum boşluk
+        const PTERO_GAP_MAX = 1200; // Kuşlar arası maksimum boşluk
+        const birds = []; // Kuşların listesi
+        let pteroAnimFrame = 0; // Kuş animasyon karesi
 
         // Bulut ayarları
         const CLOUD_COUNT = 5; // Bulut sayısı
         const CLOUD_SPEED = 1; // Bulut hızı
         const clouds = []; // Bulutların listesi
 
+        // --- Görsel Yükleme ---
+        const images = {};
+        const imageSources = {
+            // BURAYA KENDİ DİNOZOR GÖRSEL URL'LERİNİZİ YAPIŞTIRIN!
+            dinoRun1: 'https://github.com/hyperyum/HyperGames/blob/main/dino_kosma_1.png?raw=true', // Dinozor koşma karesi 1
+            dinoRun2: 'https://github.com/hyperyum/HyperGames/blob/main/dino_kosma_2.png?raw=true', // Dinozor koşma karesi 2
+            dinoJump: 'https://github.com/hyperyum/HyperGames/blob/main/dino_ziplama.png?raw=true', // Dinozor zıplama karesi
+
+            // Diğer görseller için yer tutucular şimdilik kalsın
+            cactusSmall: 'https://placehold.co/20x40/6ab04c/FFFFFF?text=CactS', // Küçük kaktüs
+            cactusMedium: 'https://placehold.co/30x60/6ab04c/FFFFFF?text=CactM', // Orta kaktüs
+            cactusLarge: 'https://placehold.co/40x80/6ab04c/FFFFFF?text=CactL', // Büyük kaktüs
+            ptero1: 'https://placehold.co/50x30/777777/FFFFFF?text=Pter1', // Kuş karesi 1
+            ptero2: 'https://placehold.co/50x30/777777/FFFFFF?text=Pter2', // Kuş karesi 2
+            cloud: 'https://placehold.co/80x40/FFFFFF/CCCCCC?text=Cloud' // Bulut
+        };
+
+        let imagesLoadedCount = 0;
+        const totalImages = Object.keys(imageSources).length;
+
+        function loadImage(name, src) {
+            const img = new Image();
+            img.src = src;
+            img.onload = () => {
+                imagesLoadedCount++;
+                if (imagesLoadedCount === totalImages) {
+                    loadingScreen.style.display = 'none'; // Yükleme ekranını gizle
+                    resetGame(); // Tüm görseller yüklendiğinde oyunu başlat
+                }
+            };
+            img.onerror = () => {
+                console.error(`Görsel yüklenemedi: ${src}`);
+                // Hata durumunda da ilerleyebilmek için sayımı artırabiliriz
+                imagesLoadedCount++;
+                if (imagesLoadedCount === totalImages) {
+                    loadingScreen.style.display = 'none';
+                    resetGame();
+                }
+            };
+            images[name] = img;
+        }
+
+        // Tüm görselleri yükle
+        for (const name in imageSources) {
+            loadImage(name, imageSources[name]);
+        }
+        // --- Görsel Yükleme Sonu ---
+
+
         // Oyun başlatma/sıfırlama fonksiyonu
         function resetGame() {
+            GAME_SPEED = INITIAL_GAME_SPEED; // Hızı sıfırla
             dinoY = GROUND_LEVEL - DINO_HEIGHT;
             dinoVelocityY = 0;
             isJumping = false;
             score = 0;
             gameOver = false;
             cacti.length = 0; // Kaktüsleri temizle
+            birds.length = 0; // Kuşları temizle
             clouds.length = 0; // Bulutları temizle
+            groundX = 0; // Zemin pozisyonunu sıfırla
+            lastScoreSpeedIncrease = 0; // Hız artışı skoru sıfırla
+            dinoRunFrame = 0; // Dino animasyon karesini sıfırla
+            pteroAnimFrame = 0; // Kuş animasyon karesini sıfırla
+
             scoreDisplay.textContent = score;
             gameOverScreen.style.display = 'none';
 
             // İlk kaktüsleri oluştur
             for (let i = 0; i < CACTUS_COUNT; i++) {
-                createCactus(i === 0 ? canvas.width : cacti[i - 1].x + cacti[i - 1].width + Math.random() * (CACTUS_GAP_MAX - CACTUS_GAP_MIN) + CACTUS_GAP_MIN);
+                createCactus(i === 0 ? canvas.width : cacti[cacti.length - 1].x + cacti[cacti.length - 1].width + Math.random() * (CACTUS_GAP_MAX - CACTUS_GAP_MIN) + CACTUS_GAP_MIN);
             }
             // Bulutları oluştur
             for (let i = 0; i < CLOUD_COUNT; i++) {
@@ -182,8 +283,24 @@
 
         // Dinozoru çizme fonksiyonu
         function drawDino() {
-            ctx.fillStyle = '#535353'; // Dinozor rengi
-            ctx.fillRect(DINO_START_X, dinoY, DINO_WIDTH, DINO_HEIGHT);
+            let currentDinoImage;
+            let dinoDrawY = dinoY;
+
+            if (isJumping) {
+                currentDinoImage = images.dinoJump;
+            } else {
+                dinoRunFrame++;
+                if (dinoRunFrame % DINO_RUN_ANIM_SPEED < DINO_RUN_ANIM_SPEED / 2) {
+                    currentDinoImage = images.dinoRun1;
+                } else {
+                    currentDinoImage = images.dinoRun2;
+                }
+            }
+
+            if (currentDinoImage && currentDinoImage.complete) {
+                // Dinozoru belirtilen boyutlarda çiz (çarpışma kutusuyla aynı)
+                ctx.drawImage(currentDinoImage, DINO_START_X, dinoDrawY, DINO_WIDTH, DINO_HEIGHT);
+            }
         }
 
         // Dinozor zıplama fonksiyonu
@@ -196,30 +313,44 @@
 
         // Kaktüs çizme fonksiyonu
         function drawCactus(cactus) {
-            ctx.fillStyle = '#6ab04c'; // Kaktüs rengi
-            ctx.fillRect(cactus.x, GROUND_LEVEL - cactus.height, cactus.width, cactus.height);
+            let cactusImage;
+            if (cactus.height <= 40) { // Small cactus
+                cactusImage = images.cactusSmall;
+            } else if (cactus.height <= 60) { // Medium cactus
+                cactusImage = images.cactusMedium;
+            } else { // Large cactus
+                cactusImage = images.cactusLarge;
+            }
+
+            if (cactusImage && cactusImage.complete) {
+                ctx.drawImage(cactusImage, cactus.x, GROUND_LEVEL - cactus.height, cactus.width, cactus.height);
+            }
         }
 
         // Rastgele kaktüs oluşturma fonksiyonu
         function createCactus(startX) {
-            const width = 15 + Math.random() * 15; // Değişken kaktüs genişliği
-            const height = 30 + Math.random() * 20; // Değişken kaktüs yüksekliği
-            cacti.push({
-                x: startX,
-                width: width,
-                height: height
-            });
+            const numCacti = Math.random() < 0.5 ? 1 : (Math.random() < 0.5 ? 2 : 3); // Tek, iki veya üçlü kaktüs grubu
+            let currentX = startX;
+            const group = [];
+            for (let i = 0; i < numCacti; i++) {
+                const width = 15 + Math.random() * 15; // Değişken kaktüs genişliği
+                const height = 30 + Math.random() * 30; // Değişken kaktüs yüksekliği
+                group.push({
+                    x: currentX,
+                    width: width,
+                    height: height
+                });
+                currentX += width + 10; // Kaktüsler arasında küçük boşluk
+            }
+            cacti.push(...group); // Grubu cacti dizisine ekle
         }
+
 
         // Bulut çizme fonksiyonu
         function drawCloud(cloud) {
-            ctx.fillStyle = '#ffffff'; // Bulut rengi
-            ctx.beginPath();
-            ctx.arc(cloud.x, cloud.y, 20, 0, Math.PI * 2); // Merkez
-            ctx.arc(cloud.x + 25, cloud.y, 15, 0, Math.PI * 2); // Sağ taraf
-            ctx.arc(cloud.x - 20, cloud.y + 10, 18, 0, Math.PI * 2); // Sol alt
-            ctx.arc(cloud.x + 10, cloud.y + 20, 22, 0, Math.PI * 2); // Sağ alt
-            ctx.fill();
+            if (images.cloud && images.cloud.complete) {
+                ctx.drawImage(images.cloud, cloud.x, cloud.y, cloud.width, cloud.height);
+            }
         }
 
         // Rastgele bulut oluşturma fonksiyonu
@@ -227,17 +358,43 @@
             clouds.push({
                 x: canvas.width + Math.random() * canvas.width, // Ekran dışından başla
                 y: 30 + Math.random() * 80, // Rastgele yükseklik
-                width: 80, // Bulut genişliği (yaklaşık)
-                height: 40 // Bulut yüksekliği (yaklaşık)
+                width: 80, // Bulut görselinin yaklaşık genişliği
+                height: 40 // Bulut görselinin yaklaşık yüksekliği
+            });
+        }
+
+        // Pterodactyl (Kuş) çizme fonksiyonu
+        function drawBird(bird) {
+            let currentBirdImage;
+            pteroAnimFrame++;
+            if (pteroAnimFrame % PTERO_ANIM_SPEED < PTERO_ANIM_SPEED / 2) {
+                currentBirdImage = images.ptero1;
+            } else {
+                currentBirdImage = images.ptero2;
+            }
+
+            if (currentBirdImage && currentBirdImage.complete) {
+                ctx.drawImage(currentBirdImage, bird.x, bird.y, PTERO_WIDTH, PTERO_HEIGHT);
+            }
+        }
+
+        // Rastgele kuş oluşturma fonksiyonu
+        function createBird() {
+            birds.push({
+                x: canvas.width + Math.random() * (PTERO_GAP_MAX - PTERO_GAP_MIN) + PTERO_GAP_MIN,
+                y: PTERO_MIN_HEIGHT + Math.random() * (PTERO_MAX_HEIGHT - PTERO_MIN_HEIGHT),
+                width: PTERO_WIDTH, // Çarpışma için kuşun genişliği
+                height: PTERO_HEIGHT // Çarpışma için kuşun yüksekliği
             });
         }
 
 
-        // Çarpışma kontrolü
+        // Çarpışma kontrolü (Görsel boyutlarına göre ayarlanabilir)
         function checkCollision() {
+            // Kaktüs çarpışması
             for (let i = 0; i < cacti.length; i++) {
                 const cactus = cacti[i];
-                // Dinozor ve kaktüsün dikdörtgenleri çakışıyor mu kontrol et
+                // Çarpışma kutuları hala basit dikdörtgenlerdir
                 if (
                     DINO_START_X < cactus.x + cactus.width &&
                     DINO_START_X + DINO_WIDTH > cactus.x &&
@@ -246,6 +403,23 @@
                 ) {
                     gameOver = true;
                     return true;
+                }
+            }
+
+            // Kuş çarpışması (belirli bir skor sonrası aktif)
+            if (score / 10 >= PTERO_SPAWN_SCORE) {
+                for (let i = 0; i < birds.length; i++) {
+                    const bird = birds[i];
+                    // Kuş için çarpışma kutusu
+                    if (
+                        DINO_START_X < bird.x + bird.width &&
+                        DINO_START_X + DINO_WIDTH > bird.x &&
+                        dinoY < bird.y + bird.height && // Dinozorun üst kenarı kuşun altından
+                        dinoY + DINO_HEIGHT > bird.y // Dinozorun alt kenarı kuşun üstünden
+                    ) {
+                        gameOver = true;
+                        return true;
+                    }
                 }
             }
             return false;
@@ -262,13 +436,23 @@
             // Ekranı temizle
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+            // Zemin çizgisi hareketini güncelle
+            groundX = (groundX - GAME_SPEED) % canvas.width; // Zemin hızla hareket etsin
+
             // Zemin çizgisi çiz
             ctx.strokeStyle = '#ccc';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = GROUND_HEIGHT;
             ctx.beginPath();
-            ctx.moveTo(0, GROUND_LEVEL);
-            ctx.lineTo(canvas.width, GROUND_LEVEL);
+            ctx.moveTo(groundX, GROUND_LEVEL);
+            ctx.lineTo(canvas.width + groundX, GROUND_LEVEL);
             ctx.stroke();
+
+            // İkinci zemin parçasını çiz (sonsuz döngü için)
+            ctx.beginPath();
+            ctx.moveTo(groundX + canvas.width, GROUND_LEVEL);
+            ctx.lineTo(groundX + canvas.width * 2, GROUND_LEVEL);
+            ctx.stroke();
+
 
             // Bulutları hareket ettir ve çiz (kaktüslerden ve dinozordan önce çizilmeli)
             for (let i = 0; i < clouds.length; i++) {
@@ -290,11 +474,38 @@
 
             // Ekran dışına çıkan kaktüsleri kaldır ve yenilerini ekle
             if (cacti.length > 0 && cacti[0].x + cacti[0].width < 0) {
-                cacti.shift(); // İlk kaktüsü kaldır
-                // Yeni kaktüsü son kaktüsün arkasına ekle
-                const lastCactus = cacti[cacti.length - 1];
-                createCactus(lastCactus.x + lastCactus.width + Math.random() * (CACTUS_GAP_MAX - CACTUS_GAP_MIN) + CACTUS_GAP_MIN);
+                let removedGroup = false;
+                while (cacti.length > 0 && cacti[0].x + cacti[0].width < 0) {
+                    const firstCactusX = cacti[0].x;
+                    cacti.shift();
+                    if (cacti.length === 0 || cacti[0].x !== firstCactusX) {
+                        removedGroup = true;
+                        break;
+                    }
+                }
+                if (removedGroup) {
+                    const lastCactusX = cacti.length > 0 ? cacti[cacti.length - 1].x + cacti[cacti.length - 1].width : canvas.width;
+                    createCactus(lastCactusX + Math.random() * (CACTUS_GAP_MAX - CACTUS_GAP_MIN) + CACTUS_GAP_MIN);
+                }
             }
+
+
+            // Kuşları hareket ettir ve çiz (belirli bir skor sonrası)
+            if (score / 10 >= PTERO_SPAWN_SCORE) {
+                for (let i = 0; i < birds.length; i++) {
+                    birds[i].x -= GAME_SPEED * 0.8; // Kuşlar biraz daha yavaş gelsin
+                    drawBird(birds[i]);
+                }
+                // Yeni kuşları ekle (eğer ekran dışına çıkan varsa veya yeterli aralık geçtiyse)
+                if (birds.length === 0 || (birds[birds.length - 1].x < canvas.width - (Math.random() * (PTERO_GAP_MAX - PTERO_GAP_MIN) + PTERO_GAP_MIN) && Math.random() < 0.01)) { // Rastgele aralıklarla kuş ekle
+                    createBird();
+                }
+                // Ekran dışına çıkan kuşları kaldır
+                if (birds.length > 0 && birds[0].x + birds[0].width < 0) {
+                    birds.shift();
+                }
+            }
+
 
             // Dinozorun konumunu güncelle
             dinoVelocityY += GRAVITY;
@@ -311,7 +522,14 @@
             // Skoru güncelle
             if (!gameOver) {
                 score++;
-                scoreDisplay.textContent = Math.floor(score / 10); // Her 10 karede bir skor artsın
+                const currentDisplayScore = Math.floor(score / 10);
+                scoreDisplay.textContent = currentDisplayScore;
+
+                // Belirli aralıklarla hızı artır
+                if (currentDisplayScore - lastScoreSpeedIncrease >= SPEED_INCREASE_INTERVAL / 10) { // Her 100 skora hız artır
+                    GAME_SPEED += SPEED_INCREASE_AMOUNT;
+                    lastScoreSpeedIncrease = currentDisplayScore;
+                }
             }
 
             // Çarpışma kontrolü
@@ -334,7 +552,7 @@
             }
         });
 
-        // Dokunmatik ekranlar için zıplama
+        // Dokunmatik ekranlar ve fare tıklaması için zıplama
         canvas.addEventListener('touchstart', (e) => {
             if (gameOver) {
                 resetGame();
@@ -344,10 +562,21 @@
             e.preventDefault(); // Varsayılan dokunma davranışını engelle
         });
 
+        canvas.addEventListener('mousedown', (e) => {
+            if (gameOver) {
+                resetGame();
+            } else {
+                jump();
+            }
+            e.preventDefault(); // Varsayılan tıklama davranışını engelle
+        });
 
-        // Oyun yüklendiğinde başlat
-        window.onload = function () {
-            resetGame();
+
+        // Sayfa yüklendiğinde tüm görsellerin yüklenmesini bekle
+        window.onload = function() {
+            // Yükleme ekranı başlangıçta gösterilir
+            loadingScreen.style.display = 'flex';
+            // Resimler loadImage fonksiyonunda yükleniyor ve yüklenince resetGame çağrılıyor
         };
 
     </script>
