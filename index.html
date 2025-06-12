@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dinozor Oyunu</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f7f7f7;
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            color: #535353;
+        }
+
+        .game-container {
+            position: relative;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        canvas {
+            background-color: #f7f7f7;
+            display: block;
+            border-radius: 8px;
+            border: 2px solid #ccc;
+            width: 800px; /* Sabit genişlik */
+            height: 200px; /* Sabit yükseklik */
+            margin-bottom: 20px;
+        }
+
+        .game-info {
+            position: absolute;
+            top: 30px;
+            right: 40px;
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #777;
+        }
+
+        .game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 2em;
+            font-weight: bold;
+            color: #535353;
+            z-index: 10;
+            text-align: center;
+            display: none; /* Varsayılan olarak gizli */
+        }
+
+        .game-over-screen p {
+            margin: 10px 0;
+        }
+
+        .game-over-screen .restart-text {
+            font-size: 0.7em;
+            color: #888;
+        }
+
+        /* Mobil cihazlar için responsive tasarım */
+        @media (max-width: 850px) {
+            .game-container {
+                width: 95%;
+                margin: 10px;
+                padding: 10px;
+            }
+            canvas {
+                width: 100%;
+                height: 150px; /* Daha küçük ekranlar için daha düşük yükseklik */
+            }
+            .game-info {
+                top: 15px;
+                right: 15px;
+                font-size: 1em;
+            }
+            .game-over-screen {
+                font-size: 1.5em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div class="game-info">
+            Skor: <span id="score">0</span>
+        </div>
+        <div class="game-over-screen" id="gameOverScreen">
+            <p>OYUN BİTTİ</p>
+            <p class="restart-text">Tekrar oynamak için BOŞLUK tuşuna basın</p>
+            <p>Son Skor: <span id="finalScore">0</span></p>
+        </div>
+    </div>
+
+    <script>
+        // Canvas ve konteks elemanlarını al
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreDisplay = document.getElementById('finalScore');
+
+        // Oyun ayarları
+        const GAME_SPEED = 5; // Oyun hızı (piksel/kare)
+        const GRAVITY = 0.6; // Yerçekimi kuvveti
+        const JUMP_STRENGTH = -10; // Zıplama kuvveti
+        const GROUND_LEVEL = canvas.height - 30; // Zemin seviyesi
+
+        // Dinozor ayarları
+        const DINO_WIDTH = 40;
+        const DINO_HEIGHT = 50;
+        const DINO_START_X = 50;
+
+        let dinoY = GROUND_LEVEL - DINO_HEIGHT; // Dinozorun Y koordinatı
+        let dinoVelocityY = 0; // Dinozorun dikey hızı
+        let isJumping = false; // Zıplama durumu
+        let score = 0; // Oyun skoru
+        let gameOver = false; // Oyun bitti mi?
+        let animationFrameId; // requestAnimationFrame ID'si
+
+        // Kaktüs ayarları
+        const CACTUS_WIDTH = 20;
+        const CACTUS_HEIGHT = 40;
+        const CACTUS_GAP_MIN = 300; // Kaktüsler arası minimum boşluk
+        const CACTUS_GAP_MAX = 600; // Kaktüsler arası maksimum boşluk
+        const CACTUS_COUNT = 3; // Ekranda aynı anda olabilecek kaktüs sayısı
+        const cacti = []; // Kaktüslerin listesi
+
+        // Bulut ayarları
+        const CLOUD_COUNT = 5; // Bulut sayısı
+        const CLOUD_SPEED = 1; // Bulut hızı
+        const clouds = []; // Bulutların listesi
+
+        // Oyun başlatma/sıfırlama fonksiyonu
+        function resetGame() {
+            dinoY = GROUND_LEVEL - DINO_HEIGHT;
+            dinoVelocityY = 0;
+            isJumping = false;
+            score = 0;
+            gameOver = false;
+            cacti.length = 0; // Kaktüsleri temizle
+            clouds.length = 0; // Bulutları temizle
+            scoreDisplay.textContent = score;
+            gameOverScreen.style.display = 'none';
+
+            // İlk kaktüsleri oluştur
+            for (let i = 0; i < CACTUS_COUNT; i++) {
+                createCactus(i === 0 ? canvas.width : cacti[i - 1].x + cacti[i - 1].width + Math.random() * (CACTUS_GAP_MAX - CACTUS_GAP_MIN) + CACTUS_GAP_MIN);
+            }
+            // Bulutları oluştur
+            for (let i = 0; i < CLOUD_COUNT; i++) {
+                createCloud();
+            }
+
+            // Önceki animasyon varsa iptal et
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            // Oyunu başlat
+            gameLoop();
+        }
+
+        // Dinozoru çizme fonksiyonu
+        function drawDino() {
+            ctx.fillStyle = '#535353'; // Dinozor rengi
+            ctx.fillRect(DINO_START_X, dinoY, DINO_WIDTH, DINO_HEIGHT);
+        }
+
+        // Dinozor zıplama fonksiyonu
+        function jump() {
+            if (!isJumping && !gameOver) {
+                dinoVelocityY = JUMP_STRENGTH;
+                isJumping = true;
+            }
+        }
+
+        // Kaktüs çizme fonksiyonu
+        function drawCactus(cactus) {
+            ctx.fillStyle = '#6ab04c'; // Kaktüs rengi
+            ctx.fillRect(cactus.x, GROUND_LEVEL - cactus.height, cactus.width, cactus.height);
+        }
+
+        // Rastgele kaktüs oluşturma fonksiyonu
+        function createCactus(startX) {
+            const width = 15 + Math.random() * 15; // Değişken kaktüs genişliği
+            const height = 30 + Math.random() * 20; // Değişken kaktüs yüksekliği
+            cacti.push({
+                x: startX,
+                width: width,
+                height: height
+            });
+        }
+
+        // Bulut çizme fonksiyonu
+        function drawCloud(cloud) {
+            ctx.fillStyle = '#ffffff'; // Bulut rengi
+            ctx.beginPath();
+            ctx.arc(cloud.x, cloud.y, 20, 0, Math.PI * 2); // Merkez
+            ctx.arc(cloud.x + 25, cloud.y, 15, 0, Math.PI * 2); // Sağ taraf
+            ctx.arc(cloud.x - 20, cloud.y + 10, 18, 0, Math.PI * 2); // Sol alt
+            ctx.arc(cloud.x + 10, cloud.y + 20, 22, 0, Math.PI * 2); // Sağ alt
+            ctx.fill();
+        }
+
+        // Rastgele bulut oluşturma fonksiyonu
+        function createCloud() {
+            clouds.push({
+                x: canvas.width + Math.random() * canvas.width, // Ekran dışından başla
+                y: 30 + Math.random() * 80, // Rastgele yükseklik
+                width: 80, // Bulut genişliği (yaklaşık)
+                height: 40 // Bulut yüksekliği (yaklaşık)
+            });
+        }
+
+
+        // Çarpışma kontrolü
+        function checkCollision() {
+            for (let i = 0; i < cacti.length; i++) {
+                const cactus = cacti[i];
+                // Dinozor ve kaktüsün dikdörtgenleri çakışıyor mu kontrol et
+                if (
+                    DINO_START_X < cactus.x + cactus.width &&
+                    DINO_START_X + DINO_WIDTH > cactus.x &&
+                    dinoY + DINO_HEIGHT > GROUND_LEVEL - cactus.height &&
+                    dinoY < GROUND_LEVEL
+                ) {
+                    gameOver = true;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Oyun döngüsü
+        function gameLoop() {
+            if (gameOver) {
+                gameOverScreen.style.display = 'flex';
+                finalScoreDisplay.textContent = Math.floor(score / 10); // Final skoru göster
+                return;
+            }
+
+            // Ekranı temizle
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Zemin çizgisi çiz
+            ctx.strokeStyle = '#ccc';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, GROUND_LEVEL);
+            ctx.lineTo(canvas.width, GROUND_LEVEL);
+            ctx.stroke();
+
+            // Bulutları hareket ettir ve çiz (kaktüslerden ve dinozordan önce çizilmeli)
+            for (let i = 0; i < clouds.length; i++) {
+                clouds[i].x -= CLOUD_SPEED;
+                drawCloud(clouds[i]);
+                // Ekran dışına çıkan bulutları kaldır ve yenilerini ekle
+                if (clouds[i].x + clouds[i].width < 0) {
+                    clouds.splice(i, 1);
+                    createCloud();
+                    i--; // Diziden eleman çıkarıldığı için indeksi ayarla
+                }
+            }
+
+            // Kaktüsleri hareket ettir ve çiz
+            for (let i = 0; i < cacti.length; i++) {
+                cacti[i].x -= GAME_SPEED;
+                drawCactus(cacti[i]);
+            }
+
+            // Ekran dışına çıkan kaktüsleri kaldır ve yenilerini ekle
+            if (cacti.length > 0 && cacti[0].x + cacti[0].width < 0) {
+                cacti.shift(); // İlk kaktüsü kaldır
+                // Yeni kaktüsü son kaktüsün arkasına ekle
+                const lastCactus = cacti[cacti.length - 1];
+                createCactus(lastCactus.x + lastCactus.width + Math.random() * (CACTUS_GAP_MAX - CACTUS_GAP_MIN) + CACTUS_GAP_MIN);
+            }
+
+            // Dinozorun konumunu güncelle
+            dinoVelocityY += GRAVITY;
+            dinoY += dinoVelocityY;
+
+            // Dinozor zemine çarptığında durdur
+            if (dinoY >= GROUND_LEVEL - DINO_HEIGHT) {
+                dinoY = GROUND_LEVEL - DINO_HEIGHT;
+                dinoVelocityY = 0;
+                isJumping = false;
+            }
+            drawDino(); // Dinozoru en son çiz (her zaman önde olsun)
+
+            // Skoru güncelle
+            if (!gameOver) {
+                score++;
+                scoreDisplay.textContent = Math.floor(score / 10); // Her 10 karede bir skor artsın
+            }
+
+            // Çarpışma kontrolü
+            if (checkCollision()) {
+                gameOver = true;
+            }
+
+            // Oyun döngüsünü tekrar çağır
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // Klavye olay dinleyicisi
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.key === ' ') { // Boşluk tuşu
+                if (gameOver) {
+                    resetGame(); // Oyun bittiyse yeniden başlat
+                } else {
+                    jump(); // Değilse zıpla
+                }
+            }
+        });
+
+        // Dokunmatik ekranlar için zıplama
+        canvas.addEventListener('touchstart', (e) => {
+            if (gameOver) {
+                resetGame();
+            } else {
+                jump();
+            }
+            e.preventDefault(); // Varsayılan dokunma davranışını engelle
+        });
+
+
+        // Oyun yüklendiğinde başlat
+        window.onload = function () {
+            resetGame();
+        };
+
+    </script>
+</body>
+</html>
